@@ -472,14 +472,20 @@ function detectAnswers(tx,tbl){
 
   const found=new Set();
   for(const it of items){
+    let matched=false;
+    // Pass 1: spaced search (word-boundary match, most reliable)
     for(const f of it.forms){
       const sp=' '+f+' ';
       if(spacedText.includes(sp)){
         found.add(it.idx);
         spacedText=spacedText.split(sp).join(' '+'░'.repeat(f.length)+' ');
         flatText=flatText.split(f).join('░'.repeat(f.length));
-        break;
+        matched=true;break;
       }
+    }
+    if(matched)continue;
+    // Pass 2: flat fallback (fast speech / no spaces)
+    for(const f of it.forms){
       if(flatText.includes(f)){
         found.add(it.idx);
         flatText=flatText.split(f).join('░'.repeat(f.length));
@@ -545,6 +551,7 @@ function stopMicViz(){
 
 /* ===== STATE ===== */
 const S={player:'',table:2,passed:new Set(),recognizer:null,listening:false,allFinal:'',lastInterim:'',shouldRestart:false,lastCorrect:0,lastFound:null};
+let resultTimer=null; // Bug 2 fix: track showResult timeout so we can cancel on back-nav
 
 /* ===== PLAYER SCREEN ===== */
 function initPlayerScreen(){
@@ -583,8 +590,8 @@ function initHome(){
   }
   document.getElementById('clearedBadge').textContent=S.passed.size>0?`★ ${S.passed.size}/11 WORLDS CLEARED`:'';
 }
-function goHome(){stopListening();stopMicViz();speechSynthesis&&speechSynthesis.cancel();initHome();show('s-home');}
-function leavePractice(){stopListening();stopMicViz();speechSynthesis&&speechSynthesis.cancel();show('s-home');}
+function goHome(){stopListening();stopMicViz();speechSynthesis&&speechSynthesis.cancel();if(resultTimer){clearTimeout(resultTimer);resultTimer=null;}initHome();show('s-home');}
+function leavePractice(){stopListening();stopMicViz();speechSynthesis&&speechSynthesis.cancel();if(resultTimer){clearTimeout(resultTimer);resultTimer=null;}show('s-home');}
 
 /* ===== PRACTICE ===== */
 function startPractice(){
@@ -636,7 +643,10 @@ function toggleListen(){
   if(S.listening){S.shouldRestart=false;S.listening=false;S.recognizer&&S.recognizer.stop();}
   else startListening();
 }
-function stopListening(){S.shouldRestart=false;S.listening=false;S.recognizer&&S.recognizer.stop();}
+function stopListening(){
+  S.shouldRestart=false;S.listening=false;
+  if(S.recognizer){try{S.recognizer.stop();}catch(e){/* already stopped */}}
+}
 
 function makeSR(){
   if(!SR_CLASS)return null;
@@ -678,6 +688,8 @@ function makeSR(){
   };
 
   r.onerror=e=>{
+    // aborted: fired by Chrome/Safari when stop() is called manually — not an error
+    if(e.error==='aborted')return;
     // no-speech: normal silence — restart loop
     if(e.error==='no-speech'&&S.shouldRestart&&S.listening){
       S.recognizer=makeSR();if(S.recognizer){try{S.recognizer.start();}catch(err){}}
@@ -727,7 +739,7 @@ function checkResult(){
   if(correct>=10){
     setFb('ok',`CLEAR! ${correct}/12`);snd('clear');flash('#f7c948');
     saveRecord(S.player,S.table,correct);
-    setTimeout(()=>showResult(data,found,correct),1300);
+    resultTimer=setTimeout(()=>{resultTimer=null;showResult(data,found,correct);},1300);
   }else{
     setFb('fail',`${correct}/12 — TRY AGAIN`);snd('bad');
     setTimeout(()=>{document.getElementById('contMic').className='a-btn';document.getElementById('micLbl').textContent='PUSH A';},300);
