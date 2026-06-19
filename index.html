@@ -340,7 +340,7 @@ body{
     <div class="cont-scroll" id="contTable"></div>
     <button class="speak-btn" onclick="speakAll()">🔊 ฟังตัวอย่าง</button>
     <div class="fb fb-idle" id="contFb">PUSH A TO START</div>
-    <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--gray);letter-spacing:1px;margin-bottom:2px;">📝 ข้อความที่จับได้</div>
+    <div style="font-family:'Press Start 2P',monospace;font-size:6px;color:var(--gray);letter-spacing:1px;margin-bottom:2px;">🎙 ข้อความที่ได้ยิน (raw)</div>
     <div class="tx" id="contTx">รอการพูด…</div>
     <div class="mic-area">
       <button class="a-btn" id="contMic" onclick="toggleListen()">🎙️</button>
@@ -651,26 +651,33 @@ function stopListening(){
 function makeSR(){
   if(!SR_CLASS)return null;
   const r=new SR_CLASS();
-  r.lang='th-TH';
-  // continuous:true works on Chrome; Safari ignores it and stops on silence —
-  // our onend-restart loop handles both cases identically
+  // iOS Safari: use 'th' (shorter code) — sometimes gives better accuracy than 'th-TH'
+  // Chrome/Edge: 'th-TH' works well with Google's server-side Thai model
+  r.lang=isSafari?'th':'th-TH';
   r.continuous=true;
   r.interimResults=true;
+  // Keep maxAlternatives=3 but filter by confidence below
   r.maxAlternatives=3;
 
   r.onresult=e=>{
     let interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
-      // Use ALL alternatives — Chrome sometimes puts tone-correct form in alt[1] or alt[2]
-      const alts=Array.from({length:e.results[i].length},(_,a)=>e.results[i][a].transcript).join(' ');
+      // Collect alternatives — but filter out low-confidence ones to reduce false positives.
+      // confidence===0 means "not reported" (common for interim) — keep those.
+      // confidence>0 but <0.45 means the engine is guessing — skip those.
+      const alts=Array.from({length:e.results[i].length},(_,a)=>e.results[i][a])
+        .filter(alt=>alt.confidence===0||alt.confidence>0.45)
+        .map(alt=>alt.transcript)
+        .join(' ');
       if(e.results[i].isFinal)S.allFinal+=alts+' ';
       else interim+=alts+' ';
     }
     S.lastInterim=interim;
     const rawTx=(S.allFinal+interim).trim();
-    // แสดง normalized text (ตัวเลขอารบิก/ไทย → คำไทย) เพื่อดูว่าระบบเทียบอะไร
-    document.getElementById('contTx').textContent=rawTx?normTx(rawTx):'รอการพูด…';
-    if(rawTx.length>3)setProgress(detectAnswers(S.allFinal+' '+interim,S.table).size);
+    // แสดง raw text ที่ได้จากไมค์ — ช่วยให้เห็นว่า Safari ส่งอะไรมาจริงๆ
+    document.getElementById('contTx').textContent=rawTx||'รอการพูด…';
+    // ต้องมี text อย่างน้อย 5 ตัวอักษรก่อนเริ่ม detection (ลด false positive จาก noise)
+    if(rawTx.length>5)setProgress(detectAnswers(S.allFinal+' '+interim,S.table).size);
   };
 
   r.onend=()=>{
